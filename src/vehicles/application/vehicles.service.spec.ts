@@ -110,6 +110,7 @@ describe('VehiclesService', () => {
     });
 
     await expect(service.list({ color: 'metalico' })).resolves.toHaveLength(1);
+    await expect(service.list({ color: 'METÁLICO' })).resolves.toHaveLength(1);
     await expect(service.list({ brand: 'fiat' })).resolves.toHaveLength(1);
     await expect(
       service.list({ color: 'azul', brand: 'volks' }),

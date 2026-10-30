@@ -112,6 +112,11 @@ describe('Vehicles (e2e)', () => {
       .expect(200);
     expect(byBrand.body).toHaveLength(1);
 
+    const byAccentedColor = await request(testApp.app.getHttpServer())
+      .get('/vehicles?color=METÁLICO')
+      .expect(200);
+    expect(byAccentedColor.body).toHaveLength(1);
+
     const combined = await request(testApp.app.getHttpServer())
       .get('/vehicles?color=azul&brand=fiat')
       .expect(200);
