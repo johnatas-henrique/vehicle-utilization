@@ -1,0 +1,53 @@
+{
+  "name": "vehicle-utilization",
+  "version": "1.0.0",
+  "description": "WebAPI to control the utilization of company vehicles",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "build": "nest build",
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "start:prod": "node dist/main",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:unit && npm run test:e2e",
+    "test:unit": "vitest run",
+    "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
+    "test:cov": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@nestjs/common": "12.3.2",
+    "@nestjs/config": "12.0.1",
+    "@nestjs/core": "12.3.2",
+    "@nestjs/platform-express": "12.3.2",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@nestjs/cli": "12.0.11",
+    "@nestjs/schematics": "12.0.12",
+    "@nestjs/testing": "12.3.2",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.0.0",
+    "@types/supertest": "^7.2.1",
+    "@vitest/coverage-v8": "^4.1.2",
+    "eslint": "^10.14.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.10",
+    "supertest": "^7.3.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "^8.72.1",
+    "vite": "^8.0.0",
+    "vitest": "^4.1.2"
+  }
+}
