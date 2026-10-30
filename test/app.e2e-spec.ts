@@ -23,4 +23,17 @@ describe('App (e2e)', () => {
     });
     expect(response.headers['x-powered-by']).toBeUndefined();
   });
+
+  it('GET /unknown answers 404 with the error envelope', async () => {
+    const response = await request(testApp.app.getHttpServer())
+      .get('/unknown')
+      .expect(404);
+
+    expect(response.body).toEqual({
+      error: {
+        code: 'NOT_FOUND',
+        message: expect.any(String) as string,
+      },
+    });
+  });
 });
