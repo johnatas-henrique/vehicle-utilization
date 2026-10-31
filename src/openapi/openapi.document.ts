@@ -67,14 +67,30 @@ const toJsonSchema = (schema: z.ZodType): SchemaObject => {
 
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
 
-const jsonBody = (name: string) => ({
+type Examples = Record<string, { summary: string; value: unknown }>;
+
+const jsonBody = (name: string, examples?: Examples) => ({
   required: true,
-  content: { 'application/json': { schema: ref(name) } },
+  content: {
+    'application/json': {
+      schema: ref(name),
+      ...(examples ? { examples } : {}),
+    },
+  },
 });
 
-const jsonResponse = (description: string, name: string) => ({
+const jsonResponse = (
+  description: string,
+  name: string,
+  examples?: Examples,
+) => ({
   description,
-  content: { 'application/json': { schema: ref(name) } },
+  content: {
+    'application/json': {
+      schema: ref(name),
+      ...(examples ? { examples } : {}),
+    },
+  },
 });
 
 const jsonListResponse = (description: string, name: string) => ({
@@ -84,9 +100,23 @@ const jsonListResponse = (description: string, name: string) => ({
   },
 });
 
-const errorResponse = (description: string) => ({
+const errorBody = (code: string, message: string, details?: string[]) => ({
+  error: { code, message, ...(details ? { details } : {}) },
+});
+
+const errorResponse = (
+  description: string,
+  example?: Record<string, unknown>,
+) => ({
   description,
-  content: { 'application/json': { schema: ref('Error') } },
+  content: {
+    'application/json': {
+      schema: ref('Error'),
+      ...(example
+        ? { examples: { envelope: { summary: description, value: example } } }
+        : {}),
+    },
+  },
 });
 
 const idParam: ParameterObject = {
@@ -94,12 +124,24 @@ const idParam: ParameterObject = {
   in: 'path',
   required: true,
   schema: { type: 'string' },
+  example: '6c1f2a54-3f4b-4a6e-9a8e-2f7d1c9b0a11',
 };
 
-const conflict = (code: string, description: string) => ({
-  description: `${description} (${code})`,
-  content: { 'application/json': { schema: ref('Error') } },
+const queryParam = (
+  name: string,
+  description: string,
+  example: string,
+): ParameterObject => ({
+  name,
+  in: 'query',
+  required: false,
+  schema: { type: 'string' },
+  description,
+  example,
 });
+
+const conflict = (code: string, description: string, message: string) =>
+  errorResponse(`${description} (${code})`, errorBody(code, message));
 
 export const openApiDocument: OpenAPIObject = {
   openapi: '3.1.0',
@@ -126,6 +168,15 @@ export const openApiDocument: OpenAPIObject = {
                   },
                   required: ['name', 'status'],
                 },
+                examples: {
+                  ready: {
+                    summary: 'Service answering on its default port',
+                    value: {
+                      name: 'vehicle-utilization-api',
+                      status: 'ok',
+                    },
+                  },
+                },
               },
             },
           },
@@ -135,32 +186,61 @@ export const openApiDocument: OpenAPIObject = {
     '/vehicles': {
       post: {
         summary: 'Creates a vehicle',
-        requestBody: jsonBody('CreateVehicle'),
+        requestBody: jsonBody('CreateVehicle', {
+          lowercasePlate: {
+            summary: 'Lowercase plate, stored as ABC1D23',
+            value: {
+              plate: 'abc1d23',
+              color: 'Azul Metálico',
+              brand: 'Volkswagen',
+            },
+          },
+          duplicatePlate: {
+            summary: 'Same plate again, answered with 409',
+            value: { plate: 'ABC1D23', color: 'Preto', brand: 'Fiat' },
+          },
+        }),
         responses: {
-          201: jsonResponse('Vehicle created', 'Vehicle'),
-          400: errorResponse('Invalid body (VALIDATION_ERROR)'),
-          409: conflict('VEHICLE_PLATE_TAKEN', 'Plate already registered'),
+          201: jsonResponse('Vehicle created', 'Vehicle', {
+            created: {
+              summary: 'Plate normalized to uppercase by the schema',
+              value: {
+                id: '3f6c8f2a-8c1e-4b1f-9f3a-1d2c3b4a5e60',
+                plate: 'ABC1D23',
+                color: 'Azul Metálico',
+                brand: 'Volkswagen',
+                createdAt: '2026-10-31T02:00:00.000Z',
+                updatedAt: '2026-10-31T02:00:00.000Z',
+              },
+            },
+          }),
+          400: errorResponse(
+            'Invalid body (VALIDATION_ERROR)',
+            errorBody(
+              'VALIDATION_ERROR',
+              'plate: Invalid input: expected string, received undefined',
+            ),
+          ),
+          409: conflict(
+            'VEHICLE_PLATE_TAKEN',
+            'Plate already registered',
+            'Vehicle with plate ABC1D23 already exists',
+          ),
         },
       },
       get: {
         summary: 'Lists vehicles',
         parameters: [
-          {
-            name: 'color',
-            in: 'query',
-            required: false,
-            schema: { type: 'string' },
-            description:
-              'Color filter, substring match ignoring case and accents',
-          },
-          {
-            name: 'brand',
-            in: 'query',
-            required: false,
-            schema: { type: 'string' },
-            description:
-              'Brand filter, substring match ignoring case and accents',
-          },
+          queryParam(
+            'color',
+            'Color filter, substring match ignoring case and accents',
+            'metalico',
+          ),
+          queryParam(
+            'brand',
+            'Brand filter, substring match ignoring case and accents',
+            'volks',
+          ),
         ],
         responses: { 200: jsonListResponse('Vehicle list', 'Vehicle') },
       },
@@ -171,18 +251,43 @@ export const openApiDocument: OpenAPIObject = {
         parameters: [idParam],
         responses: {
           200: jsonResponse('Vehicle found', 'Vehicle'),
-          404: errorResponse('Vehicle not found (NOT_FOUND)'),
+          404: errorResponse(
+            'Vehicle not found (NOT_FOUND)',
+            errorBody('NOT_FOUND', 'Vehicle <id> was not found'),
+          ),
         },
       },
       patch: {
         summary: 'Partially updates a vehicle',
         parameters: [idParam],
-        requestBody: jsonBody('UpdateVehicle'),
+        requestBody: jsonBody('UpdateVehicle', {
+          singleField: {
+            summary: 'Only the color changes, plate and brand are preserved',
+            value: { color: 'Verde' },
+          },
+          emptyBody: {
+            summary: 'Empty body is rejected with 400',
+            value: {},
+          },
+        }),
         responses: {
           200: jsonResponse('Vehicle updated', 'Vehicle'),
-          400: errorResponse('Invalid body (VALIDATION_ERROR)'),
-          404: errorResponse('Vehicle not found (NOT_FOUND)'),
-          409: conflict('VEHICLE_PLATE_TAKEN', 'Plate already registered'),
+          400: errorResponse(
+            'Invalid body (VALIDATION_ERROR)',
+            errorBody(
+              'VALIDATION_ERROR',
+              'At least one field must be provided',
+            ),
+          ),
+          404: errorResponse(
+            'Vehicle not found (NOT_FOUND)',
+            errorBody('NOT_FOUND', 'Vehicle <id> was not found'),
+          ),
+          409: conflict(
+            'VEHICLE_PLATE_TAKEN',
+            'Plate already registered',
+            'Vehicle with plate ABC1D23 already exists',
+          ),
         },
       },
       delete: {
@@ -190,31 +295,56 @@ export const openApiDocument: OpenAPIObject = {
         parameters: [idParam],
         responses: {
           204: { description: 'Vehicle deleted' },
-          404: errorResponse('Vehicle not found (NOT_FOUND)'),
-          409: conflict('VEHICLE_IN_USE', 'Vehicle has an open usage'),
+          404: errorResponse(
+            'Vehicle not found (NOT_FOUND)',
+            errorBody('NOT_FOUND', 'Vehicle <id> was not found'),
+          ),
+          409: conflict(
+            'VEHICLE_IN_USE',
+            'Vehicle has an open usage',
+            'Vehicle <id> has an active usage',
+          ),
         },
       },
     },
     '/drivers': {
       post: {
         summary: 'Creates a driver',
-        requestBody: jsonBody('CreateDriver'),
+        requestBody: jsonBody('CreateDriver', {
+          accentedName: {
+            summary: 'Accented name, later matched by an unaccented query',
+            value: { name: 'João da Silva' },
+          },
+        }),
         responses: {
-          201: jsonResponse('Driver created', 'Driver'),
-          400: errorResponse('Invalid body (VALIDATION_ERROR)'),
+          201: jsonResponse('Driver created', 'Driver', {
+            created: {
+              summary: 'Driver as stored',
+              value: {
+                id: '9b2e4c31-7a5d-4f80-b2c1-6e8d0a3f4b77',
+                name: 'João da Silva',
+                createdAt: '2026-10-31T02:00:00.000Z',
+                updatedAt: '2026-10-31T02:00:00.000Z',
+              },
+            },
+          }),
+          400: errorResponse(
+            'Invalid body (VALIDATION_ERROR)',
+            errorBody(
+              'VALIDATION_ERROR',
+              'name: Too small: expected string to have >=1 characters',
+            ),
+          ),
         },
       },
       get: {
         summary: 'Lists drivers',
         parameters: [
-          {
-            name: 'name',
-            in: 'query',
-            required: false,
-            schema: { type: 'string' },
-            description:
-              'Name filter, substring match ignoring case and accents',
-          },
+          queryParam(
+            'name',
+            'Name filter, substring match ignoring case and accents',
+            'joao',
+          ),
         ],
         responses: { 200: jsonListResponse('Driver list', 'Driver') },
       },
@@ -225,17 +355,34 @@ export const openApiDocument: OpenAPIObject = {
         parameters: [idParam],
         responses: {
           200: jsonResponse('Driver found', 'Driver'),
-          404: errorResponse('Driver not found (NOT_FOUND)'),
+          404: errorResponse(
+            'Driver not found (NOT_FOUND)',
+            errorBody('NOT_FOUND', 'Driver <id> was not found'),
+          ),
         },
       },
       patch: {
         summary: 'Partially updates a driver',
         parameters: [idParam],
-        requestBody: jsonBody('UpdateDriver'),
+        requestBody: jsonBody('UpdateDriver', {
+          rename: {
+            summary: 'Only the name changes',
+            value: { name: 'Maria Souza Lima' },
+          },
+        }),
         responses: {
           200: jsonResponse('Driver updated', 'Driver'),
-          400: errorResponse('Invalid body (VALIDATION_ERROR)'),
-          404: errorResponse('Driver not found (NOT_FOUND)'),
+          400: errorResponse(
+            'Invalid body (VALIDATION_ERROR)',
+            errorBody(
+              'VALIDATION_ERROR',
+              'At least one field must be provided',
+            ),
+          ),
+          404: errorResponse(
+            'Driver not found (NOT_FOUND)',
+            errorBody('NOT_FOUND', 'Driver <id> was not found'),
+          ),
         },
       },
       delete: {
@@ -243,22 +390,87 @@ export const openApiDocument: OpenAPIObject = {
         parameters: [idParam],
         responses: {
           204: { description: 'Driver deleted' },
-          404: errorResponse('Driver not found (NOT_FOUND)'),
-          409: conflict('DRIVER_IN_USE', 'Driver has an open usage'),
+          404: errorResponse(
+            'Driver not found (NOT_FOUND)',
+            errorBody('NOT_FOUND', 'Driver <id> was not found'),
+          ),
+          409: conflict(
+            'DRIVER_IN_USE',
+            'Driver has an open usage',
+            'Driver <id> has an active usage',
+          ),
         },
       },
     },
     '/usages': {
       post: {
         summary: 'Creates a usage',
-        requestBody: jsonBody('CreateUsage'),
+        requestBody: jsonBody('CreateUsage', {
+          now: {
+            summary: 'startedAt omitted, the server stamps the current instant',
+            value: {
+              vehicleId: '3f6c8f2a-8c1e-4b1f-9f3a-1d2c3b4a5e60',
+              driverId: '9b2e4c31-7a5d-4f80-b2c1-6e8d0a3f4b77',
+              reason: 'Visita a cliente',
+            },
+          },
+          pastWithOffset: {
+            summary: 'Explicit start with -03:00 offset, stored as 13:00Z',
+            value: {
+              vehicleId: '3f6c8f2a-8c1e-4b1f-9f3a-1d2c3b4a5e60',
+              driverId: '9b2e4c31-7a5d-4f80-b2c1-6e8d0a3f4b77',
+              reason: 'Visita a cliente',
+              startedAt: '2026-01-01T10:00:00-03:00',
+            },
+          },
+          inTheFuture: {
+            summary: 'Future start is rejected with 400 USAGE_START_IN_FUTURE',
+            value: {
+              vehicleId: '3f6c8f2a-8c1e-4b1f-9f3a-1d2c3b4a5e60',
+              driverId: '9b2e4c31-7a5d-4f80-b2c1-6e8d0a3f4b77',
+              reason: 'Futuro',
+              startedAt: '2030-01-01T00:00:00Z',
+            },
+          },
+        }),
         responses: {
-          201: jsonResponse('Usage created', 'Usage'),
+          201: jsonResponse('Usage created', 'Usage', {
+            created: {
+              summary: 'Vehicle and driver resolved into the response',
+              value: {
+                id: 'c4e668a4-6ba2-40b1-bc32-d0ac9dd9900f',
+                vehicle: {
+                  id: '3f6c8f2a-8c1e-4b1f-9f3a-1d2c3b4a5e60',
+                  plate: 'ABC1D23',
+                  color: 'Azul Metálico',
+                  brand: 'Volkswagen',
+                },
+                driver: {
+                  id: '9b2e4c31-7a5d-4f80-b2c1-6e8d0a3f4b77',
+                  name: 'João da Silva',
+                },
+                reason: 'Visita a cliente',
+                startedAt: '2026-10-31T02:00:00.000Z',
+                finishedAt: null,
+              },
+            },
+          }),
           400: errorResponse(
             'Invalid body (VALIDATION_ERROR) or start date in the future (USAGE_START_IN_FUTURE)',
+            errorBody(
+              'USAGE_START_IN_FUTURE',
+              'startedAt must not be in the future',
+            ),
           ),
-          404: errorResponse('Vehicle or driver not found (NOT_FOUND)'),
-          409: conflict('VEHICLE_IN_USE', 'Vehicle already in use'),
+          404: errorResponse(
+            'Vehicle or driver not found (NOT_FOUND)',
+            errorBody('NOT_FOUND', 'Vehicle <id> was not found'),
+          ),
+          409: conflict(
+            'VEHICLE_IN_USE',
+            'Vehicle already in use',
+            'Vehicle <id> is already in use',
+          ),
         },
       },
       get: {
@@ -271,9 +483,36 @@ export const openApiDocument: OpenAPIObject = {
         summary: 'Finishes a usage',
         parameters: [idParam],
         responses: {
-          200: jsonResponse('Usage finished', 'Usage'),
-          404: errorResponse('Usage not found (NOT_FOUND)'),
-          409: conflict('USAGE_ALREADY_FINISHED', 'Usage already finished'),
+          200: jsonResponse('Usage finished', 'Usage', {
+            finished: {
+              summary: 'finishedAt stamped by the server',
+              value: {
+                id: 'c4e668a4-6ba2-40b1-bc32-d0ac9dd9900f',
+                vehicle: {
+                  id: '3f6c8f2a-8c1e-4b1f-9f3a-1d2c3b4a5e60',
+                  plate: 'ABC1D23',
+                  color: 'Azul Metálico',
+                  brand: 'Volkswagen',
+                },
+                driver: {
+                  id: '9b2e4c31-7a5d-4f80-b2c1-6e8d0a3f4b77',
+                  name: 'João da Silva',
+                },
+                reason: 'Visita a cliente',
+                startedAt: '2026-10-31T02:00:00.000Z',
+                finishedAt: '2026-10-31T05:30:00.000Z',
+              },
+            },
+          }),
+          404: errorResponse(
+            'Usage not found (NOT_FOUND)',
+            errorBody('NOT_FOUND', 'Usage <id> was not found'),
+          ),
+          409: conflict(
+            'USAGE_ALREADY_FINISHED',
+            'Usage already finished',
+            'Usage <id> is already finished',
+          ),
         },
       },
     },

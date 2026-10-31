@@ -2,8 +2,24 @@ import request from 'supertest';
 import { createTestApp, type TestApp } from './helpers/create-app.js';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 
+interface OpenApiExamples {
+  [name: string]: { summary: string; value: Record<string, unknown> };
+}
+
+interface OpenApiMediaType {
+  schema?: Record<string, unknown>;
+  examples?: OpenApiExamples;
+}
+
+interface OpenApiResponse {
+  description: string;
+  content?: Record<string, OpenApiMediaType>;
+}
+
 interface OpenApiOperation {
-  responses: Record<string, unknown>;
+  parameters?: unknown[];
+  requestBody?: { content: Record<string, OpenApiMediaType> };
+  responses: Record<string, OpenApiResponse>;
 }
 
 interface OpenApiDocument {
@@ -30,6 +46,21 @@ const getDocument = async (testApp: TestApp): Promise<OpenApiDocument> => {
     .expect(200);
 
   return response.body as OpenApiDocument;
+};
+
+const media = (value?: OpenApiMediaType): OpenApiMediaType => {
+  if (!value) {
+    throw new Error('media type is not documented');
+  }
+  return value;
+};
+
+const examplesOf = (value?: OpenApiMediaType): OpenApiExamples => {
+  const examples = media(value).examples;
+  if (!examples) {
+    throw new Error('examples are not documented');
+  }
+  return examples;
 };
 
 describe('OpenAPI (e2e)', () => {
@@ -97,6 +128,77 @@ describe('OpenAPI (e2e)', () => {
         brand: { type: 'string', minLength: 1, maxLength: 40 },
       },
       required: ['plate', 'color', 'brand'],
+    });
+
+    expect(document.components.schemas.UpdateVehicle).not.toHaveProperty(
+      'required',
+    );
+  });
+
+  it('pre-fills the request bodies with runnable examples', async () => {
+    const document = await getDocument(testApp);
+
+    const vehicleExamples = examplesOf(
+      document.paths['/vehicles']?.post?.requestBody?.content?.[
+        'application/json'
+      ],
+    );
+    const usageExamples = examplesOf(
+      document.paths['/usages']?.post?.requestBody?.content?.[
+        'application/json'
+      ],
+    );
+
+    expect(Object.keys(vehicleExamples)).toEqual([
+      'lowercasePlate',
+      'duplicatePlate',
+    ]);
+    expect(vehicleExamples.lowercasePlate?.value).toEqual({
+      plate: 'abc1d23',
+      color: 'Azul Metálico',
+      brand: 'Volkswagen',
+    });
+    expect(usageExamples.pastWithOffset?.value.startedAt).toBe(
+      '2026-01-01T10:00:00-03:00',
+    );
+    expect(usageExamples.inTheFuture?.value.startedAt).toBe(
+      '2030-01-01T00:00:00Z',
+    );
+  });
+
+  it('pre-fills every error response with the real envelope', async () => {
+    const document = await getDocument(testApp);
+
+    const plateTaken = examplesOf(
+      document.paths['/vehicles']?.post?.responses['409']?.content?.[
+        'application/json'
+      ],
+    );
+    const vehicleInUse = examplesOf(
+      document.paths['/vehicles/{id}']?.delete?.responses['409']?.content?.[
+        'application/json'
+      ],
+    );
+    const notFound = examplesOf(
+      document.paths['/vehicles/{id}']?.get?.responses['404']?.content?.[
+        'application/json'
+      ],
+    );
+
+    expect(plateTaken.envelope?.value).toEqual({
+      error: {
+        code: 'VEHICLE_PLATE_TAKEN',
+        message: 'Vehicle with plate ABC1D23 already exists',
+      },
+    });
+    expect(vehicleInUse.envelope?.value).toEqual({
+      error: {
+        code: 'VEHICLE_IN_USE',
+        message: 'Vehicle <id> has an active usage',
+      },
+    });
+    expect(notFound.envelope?.value).toEqual({
+      error: { code: 'NOT_FOUND', message: 'Vehicle <id> was not found' },
     });
   });
 
