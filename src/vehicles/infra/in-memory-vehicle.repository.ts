@@ -30,6 +30,7 @@ export class InMemoryVehicleRepository extends VehicleRepository {
 
   findById(id: string): Promise<Vehicle | null> {
     const vehicle = this.vehicles.get(id);
+    // Soft delete is filtered here, not in the service, so no caller can forget it.
     return Promise.resolve(vehicle?.deletedAt === null ? vehicle : null);
   }
 
