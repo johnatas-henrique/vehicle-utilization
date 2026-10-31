@@ -33,6 +33,10 @@ export class InMemoryVehicleRepository extends VehicleRepository {
     return Promise.resolve(vehicle?.deletedAt === null ? vehicle : null);
   }
 
+  findForHistory(id: string): Promise<Vehicle | null> {
+    return Promise.resolve(this.vehicles.get(id) ?? null);
+  }
+
   findByPlate(plate: string): Promise<Vehicle | null> {
     const target = normalizeText(plate);
     for (const vehicle of this.vehicles.values()) {

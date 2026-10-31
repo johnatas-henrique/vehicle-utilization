@@ -31,6 +31,10 @@ export class InMemoryDriverRepository extends DriverRepository {
     return Promise.resolve(driver?.deletedAt === null ? driver : null);
   }
 
+  findForHistory(id: string): Promise<Driver | null> {
+    return Promise.resolve(this.drivers.get(id) ?? null);
+  }
+
   list(filter: DriverFilter): Promise<Driver[]> {
     const name = filter.name ? normalizeText(filter.name) : null;
 

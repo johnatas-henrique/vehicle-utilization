@@ -8,6 +8,7 @@ import type {
 export abstract class VehicleRepository {
   abstract create(input: NewVehicle): Promise<Vehicle>;
   abstract findById(id: string): Promise<Vehicle | null>;
+  abstract findForHistory(id: string): Promise<Vehicle | null>;
   abstract findByPlate(plate: string): Promise<Vehicle | null>;
   abstract list(filter: VehicleFilter): Promise<Vehicle[]>;
   abstract update(id: string, changes: VehicleChanges): Promise<Vehicle | null>;
