@@ -1,12 +1,27 @@
 import { NotFoundException } from '@nestjs/common';
-import { DriversService } from './drivers.service.js';
+import { ActiveUsageChecker } from '../../usages/application/active-usage.checker.js';
 import { InMemoryDriverRepository } from '../infra/in-memory-driver.repository.js';
+import { DriversService } from './drivers.service.js';
+
+class StubActiveUsageChecker extends ActiveUsageChecker {
+  readonly busyDrivers = new Set<string>();
+
+  hasActiveUsageByVehicle(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
+  hasActiveUsageByDriver(driverId: string): Promise<boolean> {
+    return Promise.resolve(this.busyDrivers.has(driverId));
+  }
+}
 
 describe('DriversService', () => {
   let service: DriversService;
+  let checker: StubActiveUsageChecker;
 
   beforeEach(() => {
-    service = new DriversService(new InMemoryDriverRepository());
+    checker = new StubActiveUsageChecker();
+    service = new DriversService(new InMemoryDriverRepository(), checker);
   });
 
   it('creates a driver and returns it without the deletedAt field', async () => {
@@ -19,6 +34,15 @@ describe('DriversService', () => {
       updatedAt: expect.any(String) as string,
     });
     expect(created).not.toHaveProperty('deletedAt');
+  });
+
+  it('stores timestamps in UTC ISO format', async () => {
+    const created = await service.create({ name: 'João da Silva' });
+
+    expect(created.createdAt).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+    );
+    expect(created.updatedAt).toBe(created.createdAt);
   });
 
   it('allows two drivers with the same name', async () => {
@@ -94,5 +118,45 @@ describe('DriversService', () => {
     await expect(
       service.update(created.id, { name: 'Outro Nome' }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('rejects removing a driver with an active usage with 409 DRIVER_IN_USE', async () => {
+    const created = await service.create({ name: 'João da Silva' });
+    checker.busyDrivers.add(created.id);
+
+    await expect(service.remove(created.id)).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'DRIVER_IN_USE' },
+    });
+    await expect(service.getById(created.id)).resolves.toMatchObject({
+      id: created.id,
+    });
+  });
+
+  it('removes the driver once the usage is no longer active', async () => {
+    const created = await service.create({ name: 'João da Silva' });
+    checker.busyDrivers.add(created.id);
+    checker.busyDrivers.delete(created.id);
+
+    await service.remove(created.id);
+
+    await expect(service.getById(created.id)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('finds a removed driver when resolving history', async () => {
+    const created = await service.create({ name: 'João da Silva' });
+    await service.remove(created.id);
+
+    await expect(service.getById(created.id)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(service.findForHistory(created.id)).resolves.toMatchObject({
+      name: 'João da Silva',
+    });
+    await expect(
+      service.findForHistory('2a7f1d9e-0000-4000-8000-000000000000'),
+    ).resolves.toBeNull();
   });
 });

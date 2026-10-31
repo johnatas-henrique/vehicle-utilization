@@ -1,5 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type { HttpErrorPayload } from '../../common/errors/error-code.js';
+import { ActiveUsageChecker } from '../../usages/application/active-usage.checker.js';
 import type {
   Driver,
   DriverChanges,
@@ -12,7 +17,10 @@ import { DriverRepository } from '../domain/driver.repository.js';
 
 @Injectable()
 export class DriversService {
-  constructor(private readonly drivers: DriverRepository) {}
+  constructor(
+    private readonly drivers: DriverRepository,
+    private readonly usages: ActiveUsageChecker,
+  ) {}
 
   async create(input: NewDriver): Promise<DriverView> {
     return toView(await this.drivers.create(input));
@@ -38,7 +46,22 @@ export class DriversService {
     return toView(updated);
   }
 
+  async findForHistory(id: string): Promise<DriverView | null> {
+    const driver = await this.drivers.findForHistory(id);
+    return driver === null ? null : toView(driver);
+  }
+
   async remove(id: string): Promise<void> {
+    await this.findOrFail(id);
+
+    if (await this.usages.hasActiveUsageByDriver(id)) {
+      const payload: HttpErrorPayload = {
+        code: 'DRIVER_IN_USE',
+        message: `Driver ${id} has an active usage`,
+      };
+      throw new ConflictException(payload);
+    }
+
     const removed = await this.drivers.softDelete(id);
     if (!removed) {
       throw this.notFound(id);
